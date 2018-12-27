@@ -2,6 +2,31 @@
 library(EdSurvey)
 library(haven)
 
+loadNaepData <- function(naep.path, ncessch.map = NULL) {
+  naep.input <- readNAEP(naep.path)
+  
+  naep.vars <- c("ncessch",
+                 "fips",
+                 "origwt")
+  score.vars <- searchSDF("rpcm", naep.input)$variableName
+  jkwt.vars <- searchSDF("srwt", naep.input)$variableName
+  
+  df <- getData(naep.input, c(naep.vars, score.vars, jkwt.vars))
+  colnames(df) <- tolower(colnames(df))
+  df$stateabbr <- state.abb[match(df$fips, state.name)]
+  
+  if (!is.null(ncessch.map)) {
+    ncessch.map <- as.data.frame(ncessch.map)
+    colnames(ncessch.map) <- c("ncessch.old", "ncessch.new")
+    
+    for (sch.id in unique(ncessch.map$ncessch.old)) {
+      df$ncessch[df$ncessch == sch.id] <-
+        ncessch.map$ncessch.new[ncessch.map$ncessch.old == sch.id]
+    }
+  }
+  
+  return(df)
+}
 
 createNaepData <- function(naep_path, ncessch_map = NULL) {
   naep_input <- readNAEP(naep_path)
@@ -13,7 +38,8 @@ createNaepData <- function(naep_path, ncessch_map = NULL) {
   jkwt_vars <- searchSDF("srwt", naep_input)$variableName
   
   df <- getData(naep_input, c(naep_vars, score_vars, jkwt_vars))
-  df$StateAbbr <- state.abb[match(df$fips, state.name)]
+  colnames(df) <- tolower(colnames(df))
+  df$stateabbr <- state.abb[match(df$fips, state.name)]
   
   if (!is.null(ncessch_map)) {
     for (sch_id in unique(ncessch_map$ncessch_old)) {
@@ -73,9 +99,9 @@ getSchoolRows <- function(dataset, schids = NULL) {
 getSchoolWeights = function(naep_rows) {
   agg_rows <-
     aggregate(naep_rows$origwt,
-              by = list(naep_rows$ncessch),
+              by = list(naep_rows$ncessch, naep_rows$fips),
               FUN = sum)
-  colnames(agg_rows) <- c("ncessch", "weight")
+  colnames(agg_rows) <- c("ncessch", "fips", "weight")
   return(agg_rows)
 }
 

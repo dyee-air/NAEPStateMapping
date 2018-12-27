@@ -1,7 +1,7 @@
 library(haven)
 library(readxl)
 library(EdSurvey)
-source("R:/project/DSY/NAEP State Mapping/Programs/R/Utils.R")
+source("Utils.R")
 
 ## Test change
 
@@ -30,10 +30,12 @@ sch_override <- read_excel("G:/NAEP State Mapping/NCESSch_Mapping.xlsx", sheet =
 
 # naep_data <- NAEPScoreData(path_NAEP)
 naep_data <- createNaepData(path_NAEP, sch_map)
-naep_data$data$ncessch_orig = naep_data$data$ncessch
-naep_data$data$ncessch <- sapply(naep_data$data$ncessch_orig, getSchId)
 
-for (st in unique(naep_data$data$fips)) {
+outdf <- as.data.frame(unique(naep_data[, c("fips", "stateabbr")]))
+outdf <- outdf[order(outdf$fips), ]
+rownames(outdf) <- NULL
+
+for (st in unique(naep_data$fips)) {
   if (is.na(st)) {
     next
   }
@@ -45,18 +47,18 @@ for (st in unique(naep_data$data$fips)) {
   }
   
   # state_data <- StateProfData(path_State)
-  state_data <- createSta
+  state_data <- createStateData(path_State, sch_override)
   
-  schs <- unique(state_data$data$ncessch)
-  mdta <- merge(state_data$data, naep_data$getSchoolWeights(schs), by='ncessch')
+  schs <- unique(state_data$ncessch)
+
+  mdta <- merge(state_data, getSchoolWeights(naep_sch_rows), by='ncessch')
+  mdta$pctprof = mdta$n3 / mdta$nt
   
   st_pctbelow <- 1-weighted.mean(mdta$pctprof, mdta$weight)
   
-  naep_rows <- naep_data$getSchools(schs)
-  
   inv_cdf_fun <- function(pv) {
     score_var <- paste0("mrpcm", pv)
-    return(getInvCDF(st_pctbelow, getCDFTable(naep_rows[score_var], naep_rows$origwt)))
+    return(getInvCDF(st_pctbelow, getCDFTable(mdta[score_var], mdta$weight)))
   }
 
   print(paste(st, ",", st_pctbelow, ",", mean(sapply((1:20), inv_cdf_fun))))
