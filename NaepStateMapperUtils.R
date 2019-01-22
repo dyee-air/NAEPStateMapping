@@ -87,6 +87,9 @@ getCDFTable <- function(scores, weights = NULL) {
   df <- as.data.frame(cbind(scores, weights))
   colnames(df) <- c("scores", "weights")
   
+  # Remove rows with 0 weights
+  df <- df[df$weights > 0, ]
+  
   cdf_table <-
     aggregate(df$weights, by = list(df$scores), FUN = sum)
   colnames(cdf_table) <- c("score", "weight")
@@ -100,9 +103,11 @@ getCDFTable <- function(scores, weights = NULL) {
 
 getInvCDF <- function(p, cdf_table) {
   row_lo <-
-    cdf_table[cdf_table$cdf == max(cdf_table[cdf_table$cdf <= p, 'cdf']), c('score', 'cdf')]
+    unique(cdf_table[cdf_table$cdf == max(cdf_table[cdf_table$cdf <= p, 'cdf']), c('score', 'cdf')])
   row_hi <-
-    cdf_table[cdf_table$cdf == min(cdf_table[cdf_table$cdf >= p, 'cdf']), c('score', 'cdf')]
+    unique(cdf_table[cdf_table$cdf == min(cdf_table[cdf_table$cdf >= p, 'cdf']), c('score', 'cdf')])
+  
+  # print(paste("row_lo:", row_lo$score, "| row_hi:", row_hi$score))
   
   if (row_lo$score == row_hi$score) {
     return(row_lo$score)
