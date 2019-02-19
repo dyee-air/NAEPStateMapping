@@ -2,6 +2,52 @@
 library(EdSurvey)
 library(haven)
 
+computeStateMapping <- function(naep.data, state.data) {
+  if (NROW(unique(state.data[, c('subj', 'grade')])) > 1) {
+    stop("State data contains more than one subj/grade combination.")
+  }
+  
+  nsm <- NaepStateMap(naep.data, state.data)
+  
+  # Get PV column names and number of PVs
+  pv.colnames <-
+    colnames(naep.data)[substr(colnames(naep.data), 2, 5) == "rpcm"]
+  num.pvs <- NROW(pv.colnames)
+  
+  # Get JK rep weights and number of reps
+  jk.colnames <-
+    colnames(naep.data)[substr(colnames(naep.data), 1, 4) == "srwt"]
+  num.jkreps <- NROW(jk.colnames)
+  
+  for (st in unique(nsm$naep.data$fips)) {
+    df_naep <- nsm$naep.data[nsm$naep.data$fips == st,]
+    df_state <-
+      nsm$state.data[nsm$state.data$ncessch %in% df_naep$ncessch,]
+    
+    pctprof.base <- getPctProf(df_naep, df_state)
+    
+    for (pvnum in 1:num.pvs) {
+      nsm$pvcuts.data[nsm$pvcuts.data$fips == st, paste0("cut", pvnum)] <-
+        getCutScore(pctprof.base,
+                    df_naep,
+                    weight.name = "origwt",
+                    pv = pvnum)
+    }
+    
+    cut.base <-
+      as.numeric(rowMeans(nsm$pvcuts.data[nsm$pvcuts.data$fips == st, paste0("cut", 1:num.pvs)]))
+    
+    nsm$output.data$pctprof[nsm$output.data$fips == st] <-
+      pctprof.base
+    nsm$output.data$cut[nsm$output.data$fips == st] <- cut.base
+    
+  }
+  
+  return(nsm)
+  
+}
+
+
 loadNaepData <- function(naep.path, ncessch.map = NULL) {
   naep.input <- readNAEP(naep.path)
   
@@ -15,68 +61,84 @@ loadNaepData <- function(naep.path, ncessch.map = NULL) {
   colnames(df) <- tolower(colnames(df))
   df$stateabbr <- state.abb[match(df$fips, state.name)]
   
-  if (!is.null(ncessch.map)) {
-    ncessch.map <- as.data.frame(ncessch.map)
-    colnames(ncessch.map) <- c("ncessch.old", "ncessch.new")
-    
-    for (sch.id in unique(ncessch.map$ncessch.old)) {
-      df$ncessch[df$ncessch == sch.id] <-
-        ncessch.map$ncessch.new[ncessch.map$ncessch.old == sch.id]
-    }
-  }
+  df <- df[order(df$ncessch, df$mrpcm1),]
+  rownames(df) <- NULL
   
   return(df)
 }
 
-createStateData <- function(state_path, custom_data = NULL) {
-  # NOTES:
-  #   - Allow for multiple filetypes for import - or, ideally,
-  #     externalize read function
-  subject <- "M"
-  grade <- 4
-  group <- 0
-  
-  state_data <- read_sas(state_path)
-  colnames(state_data) <- tolower(colnames(state_data))
+loadStateData <- function(state_dir) {
+  state_codes <- c(state.abb, "DC", "PR")
   
   df <-
-    state_data[state_data$subject == subject &
-                 state_data$grade == grade &
-                 state_data$group == group, c("ncessch", "nt", "n3")]
+    data.frame(
+      ncessch = character(),
+      subj = character(),
+      grade = integer(),
+      nt = integer(),
+      n3 = integer()
+    )
   
-  if (!is.null(custom_data)) {
-    colnames(custom_data) <- tolower(colnames(custom_data))
+  for (st in state_codes) {
+    path_State <-
+      paste0(state_dir, "/",
+             st,
+             "_", year, ".sas7bdat")
     
-    cdata <- custom_data[custom_data$subject == subject &
-                           custom_data$grade == grade, c("ncessch", "nt", "n3")]
-    
-    for (r in seq(NROW(cdata))) {
-      if (cdata$ncessch[r] %in% unique(df$ncessch)) {
-        df[df$ncessch == cdata$ncessch[r], c("nt", "n3")] <-
-          cdata[r, c("nt", "n3")]
-      }
-      else {
-        df <- rbind(df, cdata[r, c("ncessch", "nt", "n3")])
-      }
+    if (!file.exists(path_State)) {
+      next
     }
+    
+    df.file <- read_sas(path_State)
+    colnames(df.file) <- tolower(colnames(df.file))
+    
+    # For 2015 (and earlier?): Get rows for "Total" group only
+    if ("group" %in% colnames(df.file)) {
+      df.file <- df.file[df.file$group == 0, ]
+    }
+    
+    df.file <- df.file[, c("ncessch", "subj", "grade", "nt", "n3")]
+    
+    df <- rbind(df, df.file)
+    
   }
   
   return(df)
 }
 
-getSchoolWeights = function(naep.rows, weight.name = "origwt") {
-  colnames(naep.rows)[colnames(naep.rows) == weight.name] <- "wtvar"
+
+getSchoolWeights = function(naep.data, weight.name = "origwt") {
+  df <-
+    naep.data[, c("ncessch", weight.name)]
   
   agg.rows <-
-    aggregate(
-      naep.rows$wtvar,
-      by = list(naep.rows$ncessch, naep.rows$fips),
-      FUN = sum
-    )
+    aggregate(df[, weight.name],
+              by = list(df$ncessch),
+              FUN = sum)
   
-  colnames(agg.rows) <- c("ncessch", "fips", "weight")
+  colnames(agg.rows) <- c("ncessch", "weight")
   
   return(agg.rows)
+}
+
+getPctProf = function(naep.data, state.data, weight.name = "origwt") {
+  df.weights <- getSchoolWeights(naep.data, weight.name)
+  
+  df <-
+    merge(state.data[, c("ncessch", "nt", "n3")], df.weights, by = "ncessch")
+  
+  df$pctprof <- df$n3 / df$nt
+  return(weighted.mean(df$pctprof, df$weight))
+}
+
+getCutScore = function(pct.prof,
+                       naep.data,
+                       weight.name = "origwt",
+                       pv = 1) {
+  pv.colname <-
+    colnames(naep_df)[substring(colnames(naep_df), 2) == paste0("rpcm", pv)]
+  
+  return(getInvCDF(1 - pct.prof, getCDFTable(naep.data[, pv.colname], naep.data[, weight.name])))
 }
 
 getCDFTable <- function(scores, weights = NULL) {
@@ -88,7 +150,7 @@ getCDFTable <- function(scores, weights = NULL) {
   colnames(df) <- c("scores", "weights")
   
   # Remove rows with 0 weights
-  df <- df[df$weights > 0, ]
+  df <- df[df$weights > 0,]
   
   cdf_table <-
     aggregate(df$weights, by = list(df$scores), FUN = sum)
@@ -116,4 +178,14 @@ getInvCDF <- function(p, cdf_table) {
   a <- (p - row_lo$cdf) / (row_hi$cdf - row_lo$cdf)
   
   return((1 - a) * row_lo$score + a * row_hi$score)
+}
+
+remapNcessch <- function(naep_df, remap_df) {
+  for (schid in remap_df$ncessch) {
+    naep_df[naep_df$ncessch == schid, 'ncessch'] <-
+      as.character(remap_df[remap_df$ncessch == schid, ncol(remap_df)])
+  }
+  
+  return(naep_df)
+  
 }
