@@ -1,6 +1,3 @@
-source("NaepStateMapperUtils.R")
-
-
 NaepStateMap <- setRefClass(
   "NaepStateMap",
   fields = list(
@@ -25,7 +22,7 @@ NaepStateMap <- setRefClass(
     
     initOutputData = function() {
       # Drop state rows with zero tested students
-      state.data <<- state.data[state.data$nt > 0,]
+      state.data <<- state.data[state.data$nt > 0, ]
       naep.data <<-
         merge(naep.data, state.data[, "ncessch"], by =
                 "ncessch")

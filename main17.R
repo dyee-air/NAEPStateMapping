@@ -4,7 +4,6 @@ library(haven)
 library(readxl)
 library(EdSurvey)
 source("NaepStateMapperUtils.R")
-source("NaepStateMap.R")
 
 # Source data ----------------------------------------------------------------
 DEBUG <- TRUE
