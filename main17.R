@@ -4,23 +4,21 @@ library(haven)
 library(readxl)
 library(EdSurvey)
 source("NaepStateMapperUtils.R")
-source("NaepStateMapper.R")
+source("NaepStateMap.R")
 
 # Source data ----------------------------------------------------------------
-
-year = 2017
-subject = "M"
-grade = 4
+DEBUG <- TRUE
+year <- 2017
 
 # Path to NAEP data files
 path_NAEP_M4 <-
   "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48MAT/Data/M48NT1AT.dat"
 path_NAEP_M8 <-
-  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48MAT/Data/M48N21AT.dat"
+  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48MAT/Data/M48NT2AT.dat"
 path_NAEP_R4 <-
-  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48MAT/Data/R48NT1AT.dat"
+  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48RED/Data/R48NT1AT.dat"
 path_NAEP_R8 <-
-  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48MAT/Data/R48NT2AT.dat"
+  "R:/data/NAEP DATA REVIEW/NAEP 2017/NAEP 2017 MRP_Review 5/Y48MATREDPUR/Y48RED/Data/R48NT2AT.dat"
 
 # Directory containing state EdFacts data files
 dir_State <-
@@ -31,35 +29,47 @@ dir_State <-
 path_remap <-
   "R:/project/DSY/NAEP State Mapping/NAEP to EDFacts.xlsx"
 
+NAEP_Paths <-
+  c(path_NAEP_M4, path_NAEP_M8, path_NAEP_R4, path_NAEP_R8)
+names(NAEP_Paths) <- c("M4", "M8", "R4", "R8")
 
 
 # Initialize objects ------------------------------------------------------
 
-naep_df <- loadNaepData(path_NAEP)
 state_df <- loadStateData(dir_State)
 
-# Remap school IDs  -------------------------------------------------------
+out.maps <- list()
 
-schmap <-
-  read_excel(path_remap, sheet = paste0(subject, grade))
-# Remove single-quotes from NCESSCH strings
-for (col in colnames(schmap)) {
-  schmap[, col] <- gsub("'", "", as.character(schmap[[col]]))
+for (subj in c("M", "R")) {
+  for (grade in c(4, 8)) {
+    test_type = paste0(subj, grade)
+    
+    # Load NAEP data for this subject/grade
+    naep_df <- loadNaepData(NAEP_Paths[test_type])
+    
+    # FOR 2017: Remap first 7 chars for selected schools
+    naep_df$orig_ncessch <- naep_df$ncessch
+    substring(naep_df[substring(naep_df$ncessch, 1, 7) == '2612000', 'ncessch'], 1, 7) <-
+      '2601103'
+    
+    # Remap NCESSCH values
+    naep_df <-
+      remapNcessch(naep_df, loadSchMap(path_remap, test_type))
+    
+    # Initialize state mapper
+    if (DEBUG == TRUE) {
+      print(
+        paste(
+          "=================== SUBJECT:",
+          subj,
+          ":: GRADE:",
+          grade,
+          "==================="
+        )
+      )
+    }
+    out.maps[[test_type]] <-
+      computeStateMapping(naep_df, state_df[state_df$subj == subj &
+                                              state_df$grade == grade, ])
+  }
 }
-# Rename columns
-colnames(schmap) <- c('ncessch', 'ncessch_new')
-
-# FOR 2017: Remap first 7 chars for selected schools
-naep_df$orig_ncessch <- naep_df$ncessch
-substring(naep_df[substring(naep_df$ncessch, 1, 7) == '2612000', 'ncessch'], 1, 7) <-
-  '2601103'
-
-# Remap NCESSCH values
-naep_df <- remapNcessch(naep_df, schmap)
-
-
-# nsd <- NaepStateMapper(naep_df[naep_df$fips %in% c("Alabama", "Colorado", "Maryland"),], df.state)
-nsd <- NaepStateMapper(naep_df, state_df[state_df$subj == "M" & state_df$grade == 4, ])
-
-# Compute scores ----------------------------------------------------------
-nsd$getResults()
