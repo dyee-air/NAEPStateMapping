@@ -3,8 +3,126 @@ library(EdSurvey)
 library(haven)
 source("NaepStateMap.R")
 
-# CONVERT TO SINGLE STATE
-# Create wrapper to bulk estimate all states/consortia?
+computeStateMapping <- function(naep.data, state.data, label = "", DEBUG=FALSE) {
+  
+  # Init output object and data
+  nsm <- NaepStateMap(naep.data, state.data, label=label, DEBUG=DEBUG)
+  
+  # Get common rows for computation
+  state.df <- merge(state.data, unique(naep.data[, "ncessch", drop=FALSE]), by="ncessch")
+  naep.df <- merge(naep.data, state.data[, "ncessch", drop=FALSE], by="ncessch")
+  
+  if (NROW(state.df[state.df$nt > 0, ])==0 | NROW(naep.df)==0) {
+    if (label != "") {
+      lab.txt <- paste(" for state:", label)
+    }
+    warning(paste0("No rows found", lab.txt, ".  Skipping"))
+    return()
+  }
+  
+  nsm$results$n.state.sch <- NROW(state.df)
+  nsm$results$n.naep.sch <- NROW(unique(naep.df$ncessch))
+  
+  # Remove state rows with zero tested students
+  state.df <- state.df[state.df$nt > 0, ]
+
+  if (DEBUG == TRUE) {
+    if (label == "") {
+      print(
+        paste(
+          "=========================== Calculating scores: ==========================="
+        )
+      )
+      
+    } else {
+      print(
+        paste(
+          "=========================== Calculating scores for state:",
+          label,
+          "==========================="
+        )
+      )
+      
+    }
+    cat("PV: ")
+  }
+  
+  # COMPUTE POINT ESTIMATES
+  
+  # Get pct proficient
+  pctprof.base <- getPctProf(naep.df, state.df)
+  
+  # Get cut scores for pct prof for each PV & save to pvcuts table
+  for (pvnum in seq(nsm$pv.count)) {
+    if (DEBUG == TRUE) {
+      cat(paste0(pvnum, ".."))
+    }
+    nsm$pvcuts.data[pvnum, 1] <-
+      getCutScore(pctprof.base,
+                  naep.df,
+                  weight.name = "origwt",
+                  pv = pvnum)
+  }
+  if (DEBUG == TRUE) {
+    cat("Done\n")
+  }
+  
+  # Mean of individual PV cut scores
+  cut.base <-
+    mean(nsm$pvcuts.data[, 1])
+  
+  # Save pct prof and mean cut score to main output
+  nsm$results$pct.prof[1] <- pctprof.base
+  nsm$results$cut.score[1] <- cut.base
+  
+  
+  # COMPUTE STANDARD ERRORS
+  
+  # Compute and save imputation variance
+  nsm$results$var.impute[1] <- sum((nsm$pvcuts.data[, 1] - cut.base)^2) * (nsm$pv.count + 1) / (nsm$pv.count * (nsm$pv.count - 1))
+  
+  # Get rep weight cut/pct estimates
+  if (DEBUG == TRUE) {
+    cat("JKREP: ")
+  }
+  
+  for (jknum in seq(nsm$jk.count)) {
+    if (DEBUG == TRUE) {
+      cat(paste0(jknum, ".."))
+    }
+    pctprof.jk <-
+      getPctProf(naep.df, state.df, weight.name = nsm$jk.cols[jknum])
+    
+    cut.jk <-
+      getCutScore(pctprof.jk, naep.df, weight.name = nsm$jk.cols[jknum])
+    
+    nsm$jkpcts.data[jknum, 1] <-
+      pctprof.jk
+    nsm$jkcuts.data[jknum, 1] <- cut.jk
+    
+  }
+  if (DEBUG == TRUE) {
+    cat("Done\n")
+  }
+  
+  # Compute and save sampling variance
+  nsm$results$var.sample[1] <- sum((nsm$jkcuts.data[, 1] - nsm$pvcuts.data[1, 1])^2)
+  
+  nsm$results$cut.se[1] <- sqrt(nsm$var.impute + nsm$var.sample)
+  
+  # Compute frequencies
+  nsm$results$n.naep <- NROW(naep.df)
+  nsm$results$n.state.total <- sum(nsm$state.data$nt)
+  nsm$results$n.state.prof <- sum(nsm$state.data$n3)
+  # nsm$results$n.naep.sch <- NROW(unique(nsm$naep.data$ncessch))
+  # nsm$results$n.state.sch <- NROW(unique(state.df$ncessch))
+  
+  nsm$cleanup()
+  
+  return(nsm)
+  
+}
+
 
 addNaepGroup <-
   function(naep.data,
@@ -51,116 +169,7 @@ loadSchMap <- function(xls.path, sheet.name) {
 }
 
 
-computeStateMapping <- function(naep.data, state.data) {
-  # Make sure state data are single subject & grade
-  if (NROW(unique(state.data[, c('subj', 'grade')])) > 1) {
-    stop("State data contains more than one subj/grade combination.")
-  }
-  
-  # Init output object
-  nsm <- NaepStateMap(naep.data, state.data)
-  naep.data <- nsm$naep.data
-  state.data <- nsm$state.data
-  
-  # Get PV column names and number of PVs
-  pv.colnames <-
-    colnames(naep.data)[substr(colnames(naep.data), 2, 5) == "rpcm"]
-  num.pvs <- NROW(pv.colnames)
-  
-  # Get JK rep weights and number of reps
-  jk.colnames <-
-    colnames(naep.data)[substr(colnames(naep.data), 1, 4) == "srwt"]
-  num.jkreps <- NROW(jk.colnames)
-  
-  pvcut.cols <- paste0("cut", seq(num.pvs))
-  jkcut.cols <- paste0("cut", seq(num.jkreps))
-  
-  # Get results for each state
-  for (st in unique(nsm$naep.data$fips)) {
-    if (DEBUG == TRUE) {
-      print(
-        paste(
-          "=========================== Calculating scores for state:",
-          st,
-          "==========================="
-        )
-      )
-      cat("PV: ")
-    }
-    
-    # State-specific row index for output dataframes
-    curr.row <- nsm$output.data$fips == st
-    
-    # State-specific datasets
-    df_naep <- nsm$naep.data[nsm$naep.data$fips == st, ]
-    df_state <-
-      nsm$state.data[nsm$state.data$ncessch %in% df_naep$ncessch, ]
-    
-    # COMPUTE POINT ESTIMATES
-    
-    # Get pct proficient
-    pctprof.base <- getPctProf(df_naep, df_state)
-    
-    # Get cut scores for pct prof for each PV & save to pvcuts table
-    for (pvnum in seq(num.pvs)) {
-      if (DEBUG == TRUE) {
-        cat(paste0(pvnum, ".."))
-      }
-      nsm$pvcuts.data[curr.row, paste0("cut", pvnum)] <-
-        getCutScore(pctprof.base,
-                    df_naep,
-                    weight.name = "origwt",
-                    pv = pvnum)
-    }
-    if (DEBUG == TRUE) {
-      cat("Done\n")
-    }
-    
-    # Mean of individual PV cut scores
-    cut.base <-
-      mean(as.numeric(nsm$pvcuts.data[curr.row, pvcut.cols]))
-    
-    # Save pct prof and mean cut score to main output
-    nsm$output.data$pctprof[curr.row] <- pctprof.base
-    nsm$output.data$cut[curr.row] <- cut.base
-    
-    # COMPUTE STANDARD ERRORS
-    if (DEBUG == TRUE) {
-      cat("JKREP: ")
-    }
-    # Save imputation variance estimate to output
-    nsm$pvcuts.data$var.impute[curr.row] <-
-      sum((nsm$pvcuts.data[curr.row, pvcut.cols] - nsm$output.data[curr.row, "cut"]) ^ 2) * (num.pvs +
-                                                                                               1) / (num.pvs * (num.pvs - 1))
-    
-    
-    for (jknum in seq(num.jkreps)) {
-      if (DEBUG == TRUE) {
-        cat(paste0(jknum, ".."))
-      }
-      pctprof.jk <-
-        getPctProf(df_naep, df_state, weight.name = jk.colnames[jknum])
-      
-      cut.jk <-
-        getCutScore(pctprof.jk, df_naep, weight.name = jk.colnames[jknum])
-      
-      nsm$jkpcts.data[curr.row, paste0("pctprof", jknum)] <-
-        pctprof.jk
-      nsm$jkcuts.data[curr.row, paste0("cut", jknum)] <- cut.jk
-      
-    }
-    if (DEBUG == TRUE) {
-      cat("Done\n")
-    }
-    nsm$jkcuts.data$var.sample[curr.row] <-
-      sum(as.numeric(nsm$jkcuts.data[curr.row, jkcut.cols] - nsm$pvcuts.data$cut1[curr.row]) ^ 2)
-    nsm$output.data$se[curr.row] <-
-      sqrt(nsm$pvcuts.data$var.impute[curr.row] + nsm$jkcuts.data$var.sample[curr.row])
-  }
-  
-  return(nsm)
-  
-}
+
 
 
 loadNaepData <- function(naep.path, ncessch.map = NULL) {
@@ -194,6 +203,7 @@ loadStateData <- function(state_dir) {
   
   df <-
     data.frame(
+      state.abb = character(),
       ncessch = character(),
       subj = character(),
       grade = integer(),
@@ -211,6 +221,7 @@ loadStateData <- function(state_dir) {
       next
     }
     
+    # NOTE: read_sas() returns a tibble, not a data.frame
     df.file <- read_sas(path_State)
     colnames(df.file) <- tolower(colnames(df.file))
     
@@ -218,8 +229,8 @@ loadStateData <- function(state_dir) {
     if ("group" %in% colnames(df.file)) {
       df.file <- df.file[df.file$group == 0,]
     }
-    
-    df.file <- df.file[, c("ncessch", "subj", "grade", "nt", "n3")]
+    df.file$state.abb <- st
+    df.file <- df.file[, c("state.abb", "ncessch", "subj", "grade", "nt", "n3")]
     
     df <- rbind(df, df.file)
     
