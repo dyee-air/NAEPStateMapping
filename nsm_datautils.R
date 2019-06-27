@@ -1,13 +1,14 @@
 # Helper Functions
 library(EdSurvey)
 library(haven)
+library(readxl)
 source("NaepStateMap.R")
 
 ################################################################################
 # Utilities for loading and preparing NAEP and EdFacts data for state mapping
 ################################################################################
 
-loadNaepData <- function(naep.path, ncessch.map = NULL) {
+loadNaepData <- function(naep.path) {
   naep.input <- readNAEP(naep.path)
   
   naep.vars <- c("ncessch",
@@ -34,85 +35,71 @@ loadNaepData <- function(naep.path, ncessch.map = NULL) {
 }
 
 loadStateData <- function(state_dir) {
-  state_codes <- c(state.abb, "DC", "PR")
+  file_list <-
+    list.files(state_dir, pattern = '[[:alpha:]]{2}_20[[:digit:]]{2}.sas7bdat')
   
-  df <-
-    data.frame(
-      state.abb = character(),
-      ncessch = character(),
-      subj = character(),
-      grade = integer(),
-      nt = integer(),
-      n3 = integer()
-    )
-  
-  for (st in state_codes) {
-    path_State <-
-      paste0(state_dir, "/",
-             st,
-             "_", year, ".sas7bdat")
+  df <- data.frame()
+
+  for (file_name in file_list) {
+    stabb <- toupper(substr(file_name, 1, 2))
     
-    if (!file.exists(path_State)) {
+    if (!(stabb %in% c(state.abb, "DC", "PR"))) {
       next
     }
     
-    # NOTE: read_sas() returns a tibble, not a data.frame
-    df.file <- read_sas(path_State)
-    colnames(df.file) <- tolower(colnames(df.file))
+    tmp_file <- read_sas(paste0(state_dir, '/', file_name))
+    colnames(tmp_file) <- tolower(colnames(tmp_file))
+    tmp_file$state <- stabb
     
     # For 2015 (and earlier?): Get rows for "Total" group only
-    if ("group" %in% colnames(df.file)) {
-      df.file <- df.file[df.file$group == 0,]
+    if ("group" %in% colnames(tmp_file)) {
+      tmp_file <- tmp_file[tmp_file$group == 0, ]
     }
-    df.file$state.abb <- st
-    df.file <- df.file[, c("state.abb", "ncessch", "subj", "grade", "nt", "n3")]
     
-    df <- rbind(df, df.file)
-    
+    df <- rbind(df, tmp_file)
   }
   
   return(df)
 }
 
 addNaepGroup <-
-  function(naep.data,
-           fips.list,
-           new.fips,
-           new.fips.label = NULL) {
+  function(naep_data,
+           fips_list,
+           new_fips,
+           label = NULL) {
 
-    ndf <- naep.data
-    df <- ndf[ndf$fips %in% fips.list, ]
-
-    fips.label <- as.character(new.fips)
+    ndf <- naep_data
+    df <- ndf[ndf$fips %in% fips_list, ]
     
-    if (!is.null(new.fips.label)) {
-      fips.label <- new.fips.label
+    if (is.null(label)) {
+      label <- as.character(new_fips)
     }
         
     # Need to jump through hoops to work around R's awful handling of factor variables
-    fac.lvls <- c(unique(as.numeric(ndf$fips)), new.fips)
-    fac.lbls <- c(unique(as.character(ndf$fips)), new.fips.label)
+    fac_lvls <- c(unique(as.numeric(ndf$fips)), new_fips)
+    fac_lbls <- c(unique(as.character(ndf$fips)), label)
     
     ndf$fips <- as.numeric(ndf$fips)
-    df$fips <- new.fips
+    df$fips <- new_fips
 
     df <- rbind(ndf, df)
 
-    df$fips <- lfactor(df$fips, fac.lvls, fac.lbls)
+    df$fips <- lfactor(df$fips, fac_lvls, fac_lbls)
 
     return(df)
 }
 
-loadSchMap <- function(xls.path, sheet.name) {
-  # Load Excel file (sheet.name typically in "M4", "M8", "R4", "R8")
+loadSchMap <- function(xls_path, sheet_name, col_old=1, col_new=2) {
+  # Load Excel file (sheet_name typically in "M4", "M8", "R4", "R8")
   df <-
-    as.data.frame(read_excel(xls.path, sheet = sheet.name))
+    as.data.frame(read_excel(xls_path, sheet = sheet_name))
   
   # Remove single-quotes from NCESSCH strings
   for (col in colnames(df)) {
     df[, col] <- gsub("'", "", as.character(df[[col]]))
   }
   # Rename columns
+  df <- df[, c(col_old, col_new)]
   colnames(df) <- c('ncessch', 'ncessch_new')
   
   return(df)
@@ -121,7 +108,7 @@ loadSchMap <- function(xls.path, sheet.name) {
 remapNcessch <- function(naep_df, remap_df) {
   for (schid in remap_df$ncessch) {
     naep_df[naep_df$ncessch == schid, 'ncessch'] <-
-      as.character(remap_df[remap_df$ncessch == schid, ncol(remap_df)])
+      as.character(remap_df[remap_df$ncessch == schid, 'ncessch_new'])
   }
   
   return(naep_df)

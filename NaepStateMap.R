@@ -94,15 +94,12 @@ NaepStateMap <- setRefClass(
       }
       
       # Drop state rows with zero tested students
-      # state.data <<- state.data[state.data$nt > 0, ]
-      # Keep rows with ncessch in both datasets
+      state.data <<- state.data[state.data$nt > 0, ]
       
-      # Remove state rows that are not in NAEP
-      # state.data <<- merge(state.data, unique(naep.data[, "ncessch", drop=FALSE]), by="ncessch")
-      # Keep NAEP rows that will be used
-      # naep.data <<- merge(naep.data, state.data[, "ncessch", drop=FALSE], by="ncessch")
+      # Keep common rows for computation
+      state.data <<- merge(state.data, unique(naep.data[, "ncessch", drop=FALSE]), by="ncessch")
+      naep.data <<- merge(naep.data, state.data[, "ncessch", drop=FALSE], by="ncessch")
       
-
       # Set up results data
       result.fields <- c(
         "cut.score",

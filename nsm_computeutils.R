@@ -5,125 +5,166 @@ source("NaepStateMap.R")
 # Functions for state mapping results
 ################################################################################
 
-computeStateMapping <- function(naep.data, state.data, label = "", DEBUG=FALSE) {
-  
-  # Init output object and data
-  nsm <- NaepStateMap(naep.data, state.data, label=label, DEBUG=DEBUG)
-  
-  # Get common rows for computation
-  state.df <- merge(state.data, unique(naep.data[, "ncessch", drop=FALSE]), by="ncessch")
-  naep.df <- merge(naep.data, state.data[, "ncessch", drop=FALSE], by="ncessch")
-  
-  if (NROW(state.df[state.df$nt > 0, ])==0 | NROW(naep.df)==0) {
-    if (label != "") {
-      lab.txt <- paste(" for state:", label)
+computeStateMapping <-
+  function(naep.data,
+           state.data,
+           label = "",
+           DEBUG = FALSE) {
+    # Init output object and data
+    nsm <-
+      NaepStateMap(naep.data, state.data, label = label, DEBUG = DEBUG)
+    
+    # Check for empty dataset
+    if (NROW(nsm$state.data[nsm$state.data$nt > 0,]) == 0 |
+        NROW(nsm$naep.data) == 0) {
+      if (label != "") {
+        lab.txt <- paste(" for state:", label)
+      }
+      warning(paste0("No rows found", lab.txt, ".  Skipping."))
+      return()
     }
-    warning(paste0("No rows found", lab.txt, ".  Skipping"))
-    return()
-  }
-  
-  nsm$results$n.state.sch <- NROW(state.df)
-  nsm$results$n.naep.sch <- NROW(unique(naep.df$ncessch))
-  
-  # Remove state rows with zero tested students
-  state.df <- state.df[state.df$nt > 0, ]
-
-  if (DEBUG == TRUE) {
-    if (label == "") {
-      print(
-        paste(
-          "=========================== Calculating scores: ==========================="
+    
+    # TEMP save freqs
+    nsm$results$n.state.sch <- NROW(nsm$state.data)
+    nsm$results$n.naep.sch <- NROW(unique(nsm$naep.data$ncessch))
+    
+    
+    if (DEBUG == TRUE) {
+      if (label == "") {
+        print(
+          paste(
+            "=========================== Calculating scores: ==========================="
+          )
         )
+        
+      } else {
+        print(
+          paste(
+            "=========================== Calculating scores for state:",
+            label,
+            "==========================="
+          )
+        )
+        
+      }
+    }
+    
+    # COMPUTE POINT ESTIMATES
+    
+    point.est <- computePointEstimates(nsm$naep.data, nsm$state.data)
+    
+    # Save pct prof and mean cut score to main output
+    nsm$results$pct.prof[1] <- point.est$pct.prof
+    nsm$results$cut.score[1] <- point.est$cut.mean
+    nsm$pvcuts.data[1] <- point.est$cut.scores
+    
+    
+    # COMPUTE STANDARD ERRORS
+    
+    err.est <-
+      computeStandardErrors(
+        nsm$naep.data,
+        nsm$state.data,
+        cut.scores = point.est$cut.scores
       )
+    
+    nsm$results$cut.se[1] <- err.est$se
+    nsm$results$var.impute[1] <- err.est$var.impute
+    nsm$results$var.sample[1] <- err.est$var.sample
+    nsm$jkpcts.data[, 1] <- err.est$jk.pcts
+    nsm$jkcuts.data[, 1] <- err.est$jk.cuts
+    
+    nsm$cleanup()
+    
+    return(nsm)
+    
+  }
+
+
+computePointEstimates <-
+  function(naep.data, state.data, pct.prof.custom = NULL) {
+    # pct.prof.custom: If NULL, compute pct prof from data; otherwise, use supplied value
+    
+    pct.prof <- pct.prof.custom
+    
+    if (is.null(pct.prof)) {
+      naep.data <- merge(naep.data, state.data[, 'ncessch', drop=FALSE], by = 'ncessch')
+      
+      if (NROW(naep.data) == 0) {
+        stop('computePointEstimates: No rows found.')
+      }
+      
+      pct.prof <- getPctProf(naep.data, state.data)
+      
+    }
+    
+    pv.count <-
+      length(colnames(naep.data)[substr(colnames(naep.data), 2, 5) == "rpcm"])
+    
+    cuts <-
+      sapply(seq(pv.count), function(x)
+        getCutScore(pct.prof, naep.data, pv = x))
+    
+    return(list(
+      pct.prof = pct.prof,
+      cut.mean = mean(cuts),
+      cut.scores = cuts
+    ))
+  }
+
+computeStandardErrors <-
+  function(naep.data,
+           state.data,
+           cut.scores = NULL,
+           pct.prof.custom = NULL) {
+    jk.cols <-
+      colnames(naep.data)[substr(colnames(naep.data), 1, 4) == "srwt"]
+    
+    pct.prof <- pct.prof.custom
+    
+    if (is.null(pct.prof)) {
+      naep.data <- merge(naep.data, state.data[, 'ncessch', drop=FALSE], by = 'ncessch')
+      
+      if (NROW(naep.data) == 0) {
+        stop('computeStandardErrors: No rows found.')
+      }
+      
+      pct.prof <- getPctProf(naep.data, state.data)
+      pct.profs.jk <-
+        sapply(seq(length(jk.cols)), function(x)
+          getPctProf(naep.data, state.data, weight.name = jk.cols[x]))
       
     } else {
-      print(
-        paste(
-          "=========================== Calculating scores for state:",
-          label,
-          "==========================="
-        )
+      pct.profs.jk <- rep(pct.prof, length(jk.cols))
+    }
+    
+    if (is.null(cut.scores)) {
+      point.est <- computePointEstimates(naep.data, NULL, pct.prof)
+      cut.scores <- point.est$cut.scores
+    }
+    
+    
+    var.impute <-
+      sum((cut.scores - mean(cut.scores)) ^ 2) * (length(cut.scores) + 1) / (length(cut.scores) * (length(cut.scores) - 1))
+    
+    cut.scores.jk <-
+      sapply(seq(length(jk.cols)), function(x)
+        getCutScore(pct.profs.jk[x], naep.data, weight.name = jk.cols[x]))
+    
+    var.sample <- sum((cut.scores.jk - cut.scores[1]) ^ 2)
+    
+    se <- sqrt(var.impute + var.sample)
+    
+    return(
+      list(
+        se = se,
+        var.impute = var.impute,
+        var.sample = var.sample,
+        jk.pcts = pct.profs.jk,
+        jk.cuts = cut.scores.jk
       )
-      
-    }
-    cat("PV: ")
+    )
   }
-  
-  # COMPUTE POINT ESTIMATES
-  
-  # Get pct proficient
-  pctprof.base <- getPctProf(naep.df, state.df)
-  
-  # Get cut scores for pct prof for each PV & save to pvcuts table
-  for (pvnum in seq(nsm$pv.count)) {
-    if (DEBUG == TRUE) {
-      cat(paste0(pvnum, ".."))
-    }
-    nsm$pvcuts.data[pvnum, 1] <-
-      getCutScore(pctprof.base,
-                  naep.df,
-                  weight.name = "origwt",
-                  pv = pvnum)
-  }
-  if (DEBUG == TRUE) {
-    cat("Done\n")
-  }
-  
-  # Mean of individual PV cut scores
-  cut.base <-
-    mean(nsm$pvcuts.data[, 1])
-  
-  # Save pct prof and mean cut score to main output
-  nsm$results$pct.prof[1] <- pctprof.base
-  nsm$results$cut.score[1] <- cut.base
-  
-  
-  # COMPUTE STANDARD ERRORS
-  
-  # Compute and save imputation variance
-  nsm$results$var.impute[1] <- sum((nsm$pvcuts.data[, 1] - cut.base)^2) * (nsm$pv.count + 1) / (nsm$pv.count * (nsm$pv.count - 1))
-  
-  # Get rep weight cut/pct estimates
-  if (DEBUG == TRUE) {
-    cat("JKREP: ")
-  }
-  
-  for (jknum in seq(nsm$jk.count)) {
-    if (DEBUG == TRUE) {
-      cat(paste0(jknum, ".."))
-    }
-    pctprof.jk <-
-      getPctProf(naep.df, state.df, weight.name = nsm$jk.cols[jknum])
-    
-    cut.jk <-
-      getCutScore(pctprof.jk, naep.df, weight.name = nsm$jk.cols[jknum])
-    
-    nsm$jkpcts.data[jknum, 1] <-
-      pctprof.jk
-    nsm$jkcuts.data[jknum, 1] <- cut.jk
-    
-  }
-  if (DEBUG == TRUE) {
-    cat("Done\n")
-  }
-  
-  # Compute and save sampling variance
-  nsm$results$var.sample[1] <- sum((nsm$jkcuts.data[, 1] - nsm$pvcuts.data[1, 1])^2)
-  
-  nsm$results$cut.se[1] <- sqrt(nsm$var.impute + nsm$var.sample)
-  
-  # Compute frequencies
-  nsm$results$n.naep <- NROW(naep.df)
-  nsm$results$n.state.total <- sum(nsm$state.data$nt)
-  nsm$results$n.state.prof <- sum(nsm$state.data$n3)
-  # nsm$results$n.naep.sch <- NROW(unique(nsm$naep.data$ncessch))
-  # nsm$results$n.state.sch <- NROW(unique(state.df$ncessch))
-  
-  nsm$cleanup()
-  
-  return(nsm)
-  
-}
 
 
 getSchoolWeights = function(naep.data, weight.name = "origwt") {
@@ -142,10 +183,13 @@ getSchoolWeights = function(naep.data, weight.name = "origwt") {
 
 getPctProf = function(naep.data, state.data, weight.name = "origwt") {
   df.weights <- getSchoolWeights(naep.data, weight.name)
-  
   df <-
     merge(state.data[, c("ncessch", "nt", "n3")], df.weights, by = "ncessch")
-  # df <- df[df$nt > 0, ]
+  
+  if (NROW(df) == 0) {
+    warning('No rows found.  Returning pct.prof = 0.5')
+    return(0.5)
+  }
   
   df$pctprof <- df$n3 / df$nt
   return(weighted.mean(df$pctprof, df$weight))
@@ -156,7 +200,7 @@ getCutScore = function(pct.prof,
                        weight.name = "origwt",
                        pv = 1) {
   pv.colname <-
-    colnames(naep_df)[substring(colnames(naep_df), 2) == paste0("rpcm", pv)]
+    colnames(naep.data)[substring(colnames(naep.data), 2) == paste0("rpcm", pv)]
   
   return(getInvCDF(1 - pct.prof, getCDFTable(naep.data[, pv.colname], naep.data[, weight.name])))
 }
@@ -170,7 +214,7 @@ getCDFTable <- function(scores, weights = NULL) {
   colnames(df) <- c("scores", "weights")
   
   # Remove rows with 0 weights
-  df <- df[df$weights > 0, ]
+  df <- df[df$weights > 0,]
   
   cdf_table <-
     aggregate(df$weights, by = list(df$scores), FUN = sum)
