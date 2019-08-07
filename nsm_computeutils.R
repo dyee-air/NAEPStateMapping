@@ -228,6 +228,11 @@ getCDFTable <- function(scores, weights = NULL) {
 }
 
 getInvCDF <- function(p, cdf_table) {
+  if (NROW(cdf_table)==0) {
+    warning("CDF table is empty.  Aborting.")
+    return()
+  }
+  
   row_lo <-
     unique(cdf_table[cdf_table$cdf == max(cdf_table[cdf_table$cdf <= p, 'cdf']), c('score', 'cdf')])
   row_hi <-
