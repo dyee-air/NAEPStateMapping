@@ -49,6 +49,9 @@ CONSORTIA <- list(
 )
 
 ###############################################################################
+
+DATASETS <- list()
+
 loadMappingData <- function() {
   cat("Loading state data from directory:", STATE_DIR, "\n")
   state_data <- loadStateData(STATE_DIR)
@@ -58,8 +61,6 @@ loadMappingData <- function() {
     state_data[, c("state", "ncessch", "subj", "grade", "nt", "n3")]
   colnames(state_data)[colnames(state_data) == "subj"] <- "subject"
   
-  
-  DATASETS <- list()
   
   for (test in names(NAEP_PATHS)) {
     cat("Loading data for test:", test, "\n")
@@ -116,7 +117,7 @@ loadMappingData <- function() {
     }
     
     
-    DATASETS[[test]] <- list("naep_data" = df_naep,
+    DATASETS[[test]] <<- list("naep_data" = df_naep,
                              "state_data" = df_state)
     cat('-- Data saved to DATASETS["', test, '"].\n', sep = "")
   }

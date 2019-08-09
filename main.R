@@ -1,3 +1,5 @@
+# Set wd to path containing .R files
+setwd("G:/R Drive/NAEP State Mapping/Programs/R/NAEPStateMapping")
 source("./DataPrep2017.R")
 source("./nsm_computeutils.R")
 

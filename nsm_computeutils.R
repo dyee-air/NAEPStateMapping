@@ -1,5 +1,5 @@
 # Helper Functions
-source("NaepStateMap.R")
+source("./NaepStateMap.R")
 
 ################################################################################
 # Functions for state mapping results
