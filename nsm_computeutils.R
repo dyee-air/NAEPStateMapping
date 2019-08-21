@@ -1,6 +1,8 @@
 # Helper Functions
 source("./NaepStateMap.R")
 
+DEBUG = TRUE
+
 ################################################################################
 # Functions for state mapping results
 ################################################################################
@@ -100,6 +102,9 @@ computePointEstimates <-
     
     pv.count <-
       length(colnames(naep.data)[substr(colnames(naep.data), 2, 5) == "rpcm"])
+    if (DEBUG) {
+      print(paste0("Computing point estimates...(pct=", pct.prof, ", pvs=", pv.count, ", rows=", NROW(naep.data), ")"))
+    }
     
     cuts <-
       sapply(seq(pv.count), function(x)
@@ -216,6 +221,10 @@ getCDFTable <- function(scores, weights = NULL) {
   # Remove rows with 0 weights
   df <- df[df$weights > 0,]
   
+  if (DEBUG) {
+    print(paste0("Constructing CDF table (rows=", NROW(df), ", mean_weight=", mean(df$weights), ")"))
+  }
+  
   cdf_table <-
     aggregate(df$weights, by = list(df$scores), FUN = sum)
   colnames(cdf_table) <- c("score", "weight")
@@ -231,6 +240,10 @@ getInvCDF <- function(p, cdf_table) {
   if (NROW(cdf_table)==0) {
     warning("CDF table is empty.  Aborting.")
     return()
+  }
+  
+  if (DEBUG) {
+    print(paste0("Computing inverse CDF value (p=", p, ", cdf_rows=", NROW(cdf_table)))
   }
   
   row_lo <-
