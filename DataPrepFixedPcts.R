@@ -36,12 +36,12 @@ loadMappingData <- function() {
     grade <- as.numeric(substr(test, 2, 2))
 
     # Load NAEP data for this subject/grade
-    # cat("-- Loading NAEP data...")
-    # df_naep <- loadNaepData(NAEP_PATHS[[test]])
-    # cat("done.\n")
+    cat("-- Loading NAEP data...")
+    df_naep <- loadNaepData(NAEP_PATHS[[test]])
+    cat("done.\n")
 
-    DATASETS[[test]] <<- list("naep_data" = 1,
-    # DATASETS[[test]] <<- list("naep_data" = df_naep,
+    # DATASETS[[test]] <<- list("naep_data" = 1,
+    DATASETS[[test]] <<- list("naep_data" = df_naep,
                               "state_pcts" = state_pcts[state_pcts$subject==subject & state_pcts$grade==grade, ])
     cat('-- Data saved to DATASETS["', test, '"].\n', sep = "")
   }
