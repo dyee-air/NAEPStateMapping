@@ -26,6 +26,6 @@ for (test_name in names(DATASETS)) {
     state_pct <- state_pcts$pctprof[state_pcts$st==fips]
     point_est <- computePointEstimates(naep_state_df, pct.prof.custom=state_pct)
     std_errs <- computeStandardErrors(naep_state_df, cut.scores=point_est$cut.scores, pct.prof.custom=state_pct)
-    RESULTS[[test_name]][[lbl]] <- list(pct.prof=state_pct, cut.mean=point_est$cut.mean, se=std_errs$se)
+    RESULTS[[test_name]][[lbl]] <- list(pct.prof=state_pct, cut.mean=point_est$cut.mean, se=std_errs$se, var.impute=std_errs$var.impute, var.sample=std_errs$var.sample)
   }
 }
