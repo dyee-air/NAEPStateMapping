@@ -1,7 +1,6 @@
 # Helper Functions
 source("./NaepStateMap.R")
-
-DEBUG = TRUE
+DEBUG=TRUE
 
 ################################################################################
 # Functions for state mapping results
@@ -251,7 +250,7 @@ getInvCDF <- function(p, cdf_table) {
   row_hi <-
     unique(cdf_table[cdf_table$cdf == min(cdf_table[cdf_table$cdf >= p, 'cdf']), c('score', 'cdf')])
   
-  # print(paste("row_lo:", row_lo$score, "| row_hi:", row_hi$score))
+  print(paste("row_lo:", row_lo$score, "| row_hi:", row_hi$score))
   
   if (row_lo$score == row_hi$score) {
     return(row_lo$score)
